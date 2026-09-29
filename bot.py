@@ -2,14 +2,14 @@ import asyncio
 import os
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
+from aiohttp import web
 
-# Бот будет брать токен из настроек хостинга (или из переменной окружения)
-TOKEN = os.getenv("BOT_TOKEN", "ВАШ_ТОКЕН_ОТ_BOTFATHER_ДЛЯ_ТЕСТА_ДОМА")
+# Токен берем из переменных окружения
+TOKEN = os.getenv("BOT_TOKEN", "ВАШ_ТОКЕН_ДЛЯ_ТЕСТА")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Ваш текст приветствия
 WELCOME_TEXT = (
     "Привеет! Добро пожаловать в нашу группу, {mentions}!\n\n"
     "Если не секрет, могли бы вы представиться, пожалуйста: "
@@ -21,34 +21,41 @@ pending_users = []
 processing_lock = asyncio.Lock()
 
 async def send_grouped_welcome(chat_id: int):
-    await asyncio.sleep(2)  # Пауза 2 сек, если зашло сразу несколько человек
-    
+    await asyncio.sleep(2)
     async with processing_lock:
         if not pending_users:
             return
-        
         mentions_str = ", ".join(pending_users)
         pending_users.clear()
-        
         text = WELCOME_TEXT.format(mentions=mentions_str)
         await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
 
 @dp.message(F.new_chat_members)
 async def handle_new_members(message: Message):
     bot_info = await bot.get_me()
-    
     for new_member in message.new_chat_members:
         if new_member.id == bot_info.id:
             continue
-        
-        mention = new_member.mention_html()
-        pending_users.append(mention)
+        pending_users.append(new_member.mention_html())
     
     if pending_users:
         asyncio.create_task(send_grouped_welcome(message.chat.id))
 
+# Фиктивный заглушечный сервер для Render, чтобы сервис был активен бесплатно
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
 async def main():
-    print("Бот запущен...")
+    # Запускаем фоновый веб-сервер для удовлетворения требований Render Free Tier
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    print("Бот и веб-сервер запущены...")
     await dp.start_polling(bot, allowed_updates=["message"])
 
 if __name__ == "__main__":
